@@ -1,43 +1,43 @@
-# Vscode-Debug-Python-on-Slurm
+# 🐛 Debugging Python on Slurm with VSCode
 
-> This is a brief tutorial for Slurm HPC users to debug python scripts on the login node.
+> **Prerequisites Checklist**  
+> ✅ VSCode connected via **Remote-SSH** to Slurm login node  
+> ✅ Required VSCode extensions installed:  
+> &nbsp;&nbsp;&nbsp;• Python  
+> &nbsp;&nbsp;&nbsp;• Pylance  
+> &nbsp;&nbsp;•  Python Debugger  
+> ✅ Works for distributed scenarios (PyTorch DDP/Accelerate) - *Single node only*
 
-> Before start, make sure your vscode is attached to a slurm login node through Remote - SSH. And the `vscode-server` at login node has following vscode extensions installed: ***Python***、 ***Pylance***、 ***Python Debugger***.
+---
 
-> This method also works on `pytorch DDP`、 `Accelerate` and others distributed scenarios. But no more than 1 compute node.
+## 🚀 Getting Started
 
-Vscode Click on `Open Folder` -> `/path/to/your-python-repo`.
-Then `Terminal` -> `New Terminal`
+1. **Project Setup**  
+   ```bash
+   # In VSCode Terminal
+   cd /path/to/your-python-repo
+   conda activate your-env  # Activate your virtual environment
+   pip install debugpy      # Install debugger dependency
 
-```bash
-cd /path/to/your-python-repo
-conda activate your-env # assume that you're using conda venv
-pip instal debugpy
-```
+2. **Debug Helper Setup**
+Create utils/debug.py with this smart configuration wizard:
 
-Add the following code to the utils of your repo, for example: `utils/debug.py`.
+    ```python
+    # utils/debug.py
+    import debugpy
+    import os
+    import json
 
-It will automaticly create a satisified `.vscode/launch.json`
-```python
-# debug.py
-import debugpy
-import os
-import json
-
-
-def setup_debug(is_main_process, port=10099):
-    master_addr = os.environ['SLURM_NODELIST'].split(',')[0]
-    # write to .vscode/launch.json
-    launch_json_path = os.path.join('.vscode', 'launch.json')
-    
-    # Create .vscode directory if it doesn't exist
-    os.makedirs(os.path.dirname(launch_json_path), exist_ok=True)
-    
-    # Default launch.json content
-    default_launch_json = {
-        "version": "0.2.0",
-        "configurations": [
-            {
+    def setup_debug(is_main_process, port=10099):
+        master_addr = os.environ['SLURM_NODELIST'].split(',')[0]
+        
+        # Auto-configure .vscode/launch.json
+        launch_json_path = os.path.join('.vscode', 'launch.json')
+        os.makedirs(os.path.dirname(launch_json_path), exist_ok=True)
+        
+        default_config = {
+            "version": "0.2.0",
+            "configurations": [{
                 "name": "slurm_debug",
                 "type": "debugpy",
                 "request": "attach",
@@ -46,54 +46,62 @@ def setup_debug(is_main_process, port=10099):
                     "port": port
                 },
                 "justMyCode": True
-            }
-        ]
-    }
-    
-    # Try to read existing file, use default if fails
-    try:
-        with open(launch_json_path, 'r') as f:
-            launch_json = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        launch_json = default_launch_json
-    
-    # Update the configuration
-    if 'configurations' in launch_json and len(launch_json['configurations']) > 0:
-        launch_json['configurations'][0]['connect']['port'] = port
-        launch_json['configurations'][0]['connect']['host'] = master_addr
-    
-    # Write the updated json
-    with open(launch_json_path, 'w') as f:
-        json.dump(launch_json, f, indent=4)
+            }]
+        }
+        
+        # config updater
+        try:
+            with open(launch_json_path, 'r') as f:
+                existing_config = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            existing_config = default_config
+        
+        if existing_config.get('configurations'):
+            existing_config['configurations'][0]['connect'].update({
+                "port": port,
+                "host": master_addr
+            })
+        
+        with open(launch_json_path, 'w') as f:
+            json.dump(existing_config, f, indent=4)
 
-    if is_main_process:  # only master process
-        print("master_addr = ", master_addr, flush=True)
-        debugpy.listen((master_addr, port))
-        print(f"Port {port} waiting for debugger attach...", flush=True)
-        debugpy.wait_for_client()
-        print("Debugger attached", flush=True)
-```
+        if is_main_process:  # 🎯 Master process handler
+            print(f"🚨 Debug portal active on {master_addr}:{port}", flush=True)
+            debugpy.listen((master_addr, port))
+            debugpy.wait_for_client()
+            print("🔗 Debugger linked!", flush=True)
+    ```
 
-Call setup_debug at `your-main.py`:
+## 🧩 Integration in your code
 
-```python
-from utils.debug import setup_debug
+1. **In your main script (your-main.py):**
 
-is_main_process = True # This is useful in scenarios like multi-process(GPU) training
-setup_debug(is_main_process)
-res = 0
-for a in range(0, 100): 
-    res += a # -> add a break point at where you want after calling setup_debug()
-```
 
-```bash
-srun bash your-launch-scripts 
-# launch the python code through command line
+    ```python
+    from utils.debug import setup_debug
 
-# Command Line Output
-# master_addr = XXXXXXXX
-# Port 10099 waiting for debugger attach...
-```
+    # Initialize debug hook
+    setup_debug(is_main_process=True)  # Listen on master process
 
-Then you can attach vscode Python Debugger through click on the `slurm_debug` button.
-![](assets/button.jpg)
+    # Your code here
+    res = 0
+    for a in range(0, 100):
+        res += a  # Set breakpoints at where you want, after setup_debug() is called    
+    ```
+
+2. **Launch via Slurm:**
+
+    ```bash
+    srun bash your-launch-script.sh
+    # Expected output:
+    # 🚨 Debug portal active on XXXXXXXX:10099
+    # 🔌 Port 10099 waiting for connection...
+    ```
+
+
+3. **Click the debug icon in VSCode sidebar (⇧⌘D)**
+4. **Select `slurm_debug` configuration**
+
+    ![Select slurm_debug configuration](assets/button.jpg)
+
+5. **Hit F5 to attach debugger**
